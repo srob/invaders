@@ -1,0 +1,485 @@
+#include <M5Cardputer.h>
+
+const int SCREEN_W = 240;
+const int SCREEN_H = 135;
+
+// Player
+int shipX = SCREEN_W / 2 - 5;
+int shipY = SCREEN_H - 15;
+const int shipW = 10;
+const int shipH = 5;
+int lives = 3;
+
+// Bullet
+int bulletX = 0;
+int bulletY = 0;
+bool bulletActive = false;
+
+// Alien config
+const int numRows = 3;
+const int numCols = 8;
+const int alienW = 12;
+const int alienH = 6;
+const int alienSpacingX = 24;
+const int alienSpacingY = 14;
+int alienStartX = 16;
+int alienStartY = 20;
+int alienDir = 1;
+bool alienAnimationFrame = false;
+
+unsigned long lastAlienMove = 0;
+const int alienMoveInterval = 400;
+
+struct Alien {
+  int x, y;
+  bool alive;
+};
+
+Alien aliens[numRows][numCols];
+
+const int maxAlienBullets = 5;
+
+struct AlienBullet {
+  int x, y;
+  bool active;
+};
+
+AlienBullet alienBullets[maxAlienBullets];
+
+const int alienMarchTones[4] = { 800, 900, 1000, 1100 };
+int currentAlienTone = 0;
+
+// Mothership
+int mothershipX = 0;
+int mothershipY = 10;
+int mothershipW = 16;
+int mothershipH = 8;
+bool mothershipActive = false;
+bool mothershipDirectionRight = true;
+unsigned long lastMothershipSpawn = 0;
+const unsigned long mothershipSpawnInterval = 15000;  // every 15 seconds
+unsigned long lastMothershipSound = 0;
+const int mothershipSoundInterval = 300;  // ms between beeps
+
+
+struct Explosion {
+  int x, y;
+  int frame;
+  bool active;
+  uint16_t color;
+};
+
+const int maxExplosions = 10;
+const int explosionFrames = 4;
+Explosion explosions[maxExplosions];
+
+int score = 0;
+
+bool showBonus = false;
+unsigned long bonusStart = 0;
+const int bonusDuration = 800;  // ms
+int bonusX = 0;
+int bonusY = 0;
+
+
+unsigned long lastFrame = 0;
+const int frameDelay = 30;
+
+char lastMoveKey = 0;
+unsigned long lastMoveTime = 0;
+const unsigned long repeatInterval = 60;  // ms between repeats
+const int moveStep = 3;
+
+void initAliens() {
+  for (int row = 0; row < numRows; row++) {
+    for (int col = 0; col < numCols; col++) {
+      aliens[row][col].x = alienStartX + col * alienSpacingX;
+      aliens[row][col].y = alienStartY + row * alienSpacingY;
+      aliens[row][col].alive = true;
+    }
+  }
+}
+
+void drawShip() {
+  M5Cardputer.Display.fillRect(shipX, shipY, shipW, shipH, WHITE);
+}
+
+void clearShip() {
+  M5Cardputer.Display.fillRect(shipX, shipY, shipW, shipH, BLACK);
+}
+
+void drawBullet() {
+  M5Cardputer.Display.drawFastVLine(bulletX, bulletY, 5, GREEN);
+}
+
+void clearBullet() {
+  M5Cardputer.Display.drawFastVLine(bulletX, bulletY, 5, BLACK);
+}
+
+void drawAliens() {
+  for (int row = 0; row < numRows; row++) {
+    for (int col = 0; col < numCols; col++) {
+      Alien &a = aliens[row][col];
+      if (a.alive) {
+        if (alienAnimationFrame) {
+          M5Cardputer.Display.fillRect(a.x, a.y, alienW, alienH, RED);
+        } else {
+          M5Cardputer.Display.drawRect(a.x, a.y, alienW, alienH, RED);
+        }
+      }
+    }
+  }
+}
+
+bool isExplosionAt(int x, int y) {
+  for (int i = 0; i < maxExplosions; i++) {
+    if (explosions[i].active && explosions[i].x == x && explosions[i].y == y) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void clearAliens() {
+  for (int row = 0; row < numRows; row++) {
+    for (int col = 0; col < numCols; col++) {
+      Alien &a = aliens[row][col];
+      if (a.alive && !isExplosionAt(a.x, a.y)) {
+        M5Cardputer.Display.fillRect(a.x, a.y, alienW, alienH, BLACK);
+      }
+    }
+  }
+}
+
+void drawScore() {
+  M5Cardputer.Display.fillRect(0, 0, 80, 10, BLACK);
+  M5Cardputer.Display.setCursor(0, 0);
+  M5Cardputer.Display.setTextColor(WHITE);
+  M5Cardputer.Display.print("Score: ");
+  M5Cardputer.Display.print(score);
+}
+
+void drawLives() {
+  M5Cardputer.Display.fillRect(100, 0, 80, 10, BLACK);
+  M5Cardputer.Display.setCursor(100, 0);
+  M5Cardputer.Display.setTextColor(WHITE);
+  M5Cardputer.Display.print("Lives: ");
+  M5Cardputer.Display.print(lives);
+}
+
+void fireBullet() {
+  if (!bulletActive) {
+    bulletX = shipX + shipW / 2;
+    bulletY = shipY - 5;
+    bulletActive = true;
+    M5Cardputer.Speaker.tone(1000, 80);
+  }
+}
+
+bool checkCollision(Alien &a) {
+  return bulletX >= a.x && bulletX <= (a.x + alienW) && bulletY >= a.y && bulletY <= (a.y + alienH);
+}
+
+bool allAliensDead() {
+  for (int row = 0; row < numRows; row++) {
+    for (int col = 0; col < numCols; col++) {
+      if (aliens[row][col].alive) return false;
+    }
+  }
+  return true;
+}
+
+bool aliensReachedPlayer() {
+  for (int row = 0; row < numRows; row++) {
+    for (int col = 0; col < numCols; col++) {
+      Alien &a = aliens[row][col];
+      if (a.alive && a.y + alienH >= shipY) return true;
+    }
+  }
+  return false;
+}
+
+void drawExplosions() {
+  for (int i = 0; i < maxExplosions; i++) {
+    if (explosions[i].active) {
+      explosions[i].frame++;
+      if (explosions[i].frame >= explosionFrames) {
+        explosions[i].active = false;
+        continue;
+      }
+      int size = 4 + explosions[i].frame * 4;
+      int half = size / 2;
+      M5Cardputer.Display.fillCircle(explosions[i].x, explosions[i].y, half, explosions[i].color);
+    }
+  }
+}
+
+void spawnExplosion(int x, int y, uint16_t color) {
+  for (int i = 0; i < maxExplosions; i++) {
+    if (!explosions[i].active) {
+      explosions[i].x = x;
+      explosions[i].y = y;
+      explosions[i].frame = 0;
+      explosions[i].active = true;
+      explosions[i].color = color;
+      break;
+    }
+  }
+}
+
+void clearExplosions() {
+  for (int i = 0; i < maxExplosions; i++) {
+    if (explosions[i].active) {
+      int size = 4 + explosions[i].frame * 4;
+      int half = size / 2;
+      M5Cardputer.Display.fillCircle(explosions[i].x, explosions[i].y, half, BLACK);
+    }
+  }
+}
+
+void fireAlienBullet(int x, int y) {
+  for (int i = 0; i < maxAlienBullets; i++) {
+    if (!alienBullets[i].active) {
+      alienBullets[i].x = x + alienW / 2;
+      alienBullets[i].y = y + alienH;
+      alienBullets[i].active = true;
+      break;
+    }
+  }
+}
+
+void clearAlienBullets() {
+  for (int i = 0; i < maxAlienBullets; i++) {
+    if (alienBullets[i].active) {
+      M5Cardputer.Display.drawFastVLine(alienBullets[i].x, alienBullets[i].y, 5, BLACK);
+    }
+  }
+}
+
+void drawAlienBullets() {
+  for (int i = 0; i < maxAlienBullets; i++) {
+    if (alienBullets[i].active) {
+      M5Cardputer.Display.drawFastVLine(alienBullets[i].x, alienBullets[i].y, 5, RED);
+    }
+  }
+}
+
+void showGameOver() {
+  M5Cardputer.Display.fillScreen(BLACK);
+  M5Cardputer.Display.setTextColor(WHITE);
+  M5Cardputer.Display.setTextSize(2);
+  int textWidth = 12 * strlen("GAME OVER");
+  M5Cardputer.Display.setCursor((SCREEN_W - textWidth) / 2, SCREEN_H / 2 - 10);
+  M5Cardputer.Display.println("GAME OVER");
+  M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.setCursor((SCREEN_W - 110) / 2, SCREEN_H / 2 + 15);
+  M5Cardputer.Display.println("Reset to try again");
+  while (true)
+    ;
+}
+
+void drawBonusText() {
+  if (showBonus && millis() - bonusStart < bonusDuration) {
+    M5Cardputer.Display.setCursor(bonusX - 10, bonusY);
+    M5Cardputer.Display.setTextColor(MAGENTA);
+    M5Cardputer.Display.setTextSize(1);
+    M5Cardputer.Display.print("+50");
+  } else if (showBonus) {
+    showBonus = false;
+    M5Cardputer.Display.fillRect(bonusX - 10, bonusY, 30, 10, BLACK);  // Clear text
+  }
+}
+
+void setup() {
+  M5Cardputer.begin();
+  M5Cardputer.Display.setRotation(1);
+  M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.fillScreen(BLACK);
+  initAliens();
+}
+
+void loop() {
+  M5Cardputer.update();
+  if (millis() - lastFrame > frameDelay) {
+    lastFrame = millis();
+    clearShip();
+    if (bulletActive) clearBullet();
+    clearAliens();
+    clearExplosions();
+    clearAlienBullets();
+
+    auto keys = M5Cardputer.Keyboard.keysState();
+    unsigned long now = millis();
+
+    // Handle key press (fire bullet or movement start)
+    if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
+      for (char key : keys.word) {
+        if (key == 'a' || key == 'd') {
+          lastMoveKey = key;
+          lastMoveTime = now;
+        }
+        if (key == 'f' || key == ' ') {
+          fireBullet();
+        }
+      }
+    }
+
+    // Handle key repeat for movement
+    if (lastMoveKey && (now - lastMoveTime >= repeatInterval)) {
+      if (lastMoveKey == 'a' && shipX > 0) shipX -= moveStep;
+      if (lastMoveKey == 'd' && shipX < SCREEN_W - shipW) shipX += moveStep;
+      lastMoveTime = now;
+    }
+
+    // Stop movement if key no longer held
+    bool stillHolding = false;
+    for (char key : keys.word) {
+      if (key == lastMoveKey) {
+        stillHolding = true;
+        break;
+      }
+    }
+    if (!stillHolding) {
+      lastMoveKey = 0;
+    }
+
+    if (bulletActive) {
+      bulletY -= 5;
+      if (bulletY < 0) bulletActive = false;
+      for (int row = 0; row < numRows; row++) {
+        for (int col = 0; col < numCols; col++) {
+          Alien &a = aliens[row][col];
+          if (a.alive && checkCollision(a)) {
+            a.alive = false;
+            bulletActive = false;
+            score += 10;
+            spawnExplosion(a.x + alienW / 2, a.y + alienH / 2, ORANGE);
+            M5Cardputer.Speaker.tone(300, 100);
+          }
+        }
+      }
+    }
+
+    for (int i = 0; i < maxAlienBullets; i++) {
+      if (alienBullets[i].active) {
+        alienBullets[i].y += 3;
+        if (alienBullets[i].y >= SCREEN_H) {
+          alienBullets[i].active = false;
+        } else if (
+          alienBullets[i].x >= shipX && alienBullets[i].x <= (shipX + shipW) && alienBullets[i].y >= shipY && alienBullets[i].y <= (shipY + shipH)) {
+          alienBullets[i].active = false;
+          spawnExplosion(shipX + shipW / 2, shipY + shipH / 2, RED);
+          lives--;
+          M5Cardputer.Speaker.tone(200, 300);
+        }
+      }
+    }
+
+    if (millis() - lastAlienMove > alienMoveInterval) {
+      M5Cardputer.Speaker.tone(alienMarchTones[currentAlienTone], 100);
+      currentAlienTone = (currentAlienTone + 1) % 4;
+
+      alienAnimationFrame = !alienAnimationFrame;
+      lastAlienMove = millis();
+      bool needToReverse = false;
+      for (int row = 0; row < numRows; row++) {
+        for (int col = 0; col < numCols; col++) {
+          Alien &a = aliens[row][col];
+          if (a.alive) {
+            a.x += alienDir * 2;
+            if (a.x <= 0 || a.x + alienW >= SCREEN_W) {
+              needToReverse = true;
+            }
+          }
+        }
+      }
+      if (needToReverse) {
+        alienDir *= -1;
+        for (int row = 0; row < numRows; row++) {
+          for (int col = 0; col < numCols; col++) {
+            aliens[row][col].y += 6;
+          }
+        }
+      }
+    }
+
+    if (random(0, 20) == 0) {
+      int col = random(numCols);
+      for (int row = numRows - 1; row >= 0; row--) {
+        if (aliens[row][col].alive) {
+          fireAlienBullet(aliens[row][col].x, aliens[row][col].y);
+          break;
+        }
+      }
+    }
+
+    if (aliensReachedPlayer()) {
+      lives--;
+      M5Cardputer.Speaker.tone(200, 300);
+      if (lives <= 0) showGameOver();
+      initAliens();
+    }
+
+    if (allAliensDead()) {
+      initAliens();
+    }
+
+    // Bullet hits mothership
+    if (mothershipActive && bulletActive) {
+      if (bulletX >= mothershipX && bulletX <= (mothershipX + mothershipW) && bulletY >= mothershipY && bulletY <= (mothershipY + mothershipH)) {
+        mothershipActive = false;
+        bulletActive = false;
+        spawnExplosion(mothershipX + mothershipW / 2, mothershipY + mothershipH / 2, MAGENTA);
+        score += 50;
+        M5Cardputer.Speaker.tone(1500, 150);
+        showBonus = true;
+        bonusStart = millis();
+        bonusX = mothershipX + mothershipW / 2;
+        bonusY = mothershipY - 10;
+      }
+    }
+
+    drawShip();
+    if (bulletActive) drawBullet();
+    drawAliens();
+    drawExplosions();
+    drawAlienBullets();
+
+    // Mothership spawn logic
+    if (!mothershipActive && millis() - lastMothershipSpawn > mothershipSpawnInterval) {
+      mothershipActive = true;
+      mothershipDirectionRight = random(0, 2);  // 0 = left to right, 1 = right to left
+      mothershipX = mothershipDirectionRight ? -mothershipW : SCREEN_W;
+      lastMothershipSpawn = millis();
+    }
+
+    // Mothership movement
+    if (mothershipActive) {
+      // Clear previous mothership position
+      M5Cardputer.Display.fillRect(mothershipX, mothershipY, mothershipW, mothershipH, BLACK);
+
+      mothershipX += mothershipDirectionRight ? 2 : -2;
+
+      if ((mothershipDirectionRight && mothershipX > SCREEN_W) || (!mothershipDirectionRight && mothershipX + mothershipW < 0)) {
+        mothershipActive = false;
+      } else {
+        M5Cardputer.Display.fillRect(mothershipX, mothershipY, mothershipW, mothershipH, PURPLE);
+      }
+    }
+
+    if (mothershipActive) {
+      if (millis() - lastMothershipSound > mothershipSoundInterval) {
+        M5Cardputer.Speaker.tone(900, 100);  // Short beep
+        lastMothershipSound = millis();
+      }
+    }
+
+    drawScore();
+    drawLives();
+    drawBonusText();
+
+    if (lives <= 0) {
+      showGameOver();
+    }
+  }
+}
