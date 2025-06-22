@@ -3,12 +3,17 @@
 const int SCREEN_W = 240;
 const int SCREEN_H = 135;
 
-// Player
+// Player / ship
 int shipX = SCREEN_W / 2 - 5;
 int shipY = SCREEN_H - 15;
 const int shipW = 10;
 const int shipH = 5;
 int lives = 3;
+
+bool shipHit = false;
+unsigned long shipExplosionStart = 0;
+const int shipExplosionDuration = 400;  // You can tweak this
+bool pendingGameOver = false;
 
 // Bullet
 int bulletX = 0;
@@ -73,6 +78,12 @@ const int maxExplosions = 10;
 const int explosionFrames = 4;
 Explosion explosions[maxExplosions];
 
+bool crackleActive = false;
+unsigned long crackleStart = 0;
+int crackleStep = 0;
+bool boomPhase = false;
+unsigned long lastCrackleTime = 0;
+
 int score = 0;
 
 bool showBonus = false;
@@ -80,7 +91,6 @@ unsigned long bonusStart = 0;
 const int bonusDuration = 800;  // ms
 int bonusX = 0;
 int bonusY = 0;
-
 
 unsigned long lastFrame = 0;
 const int frameDelay = 30;
@@ -237,18 +247,40 @@ void clearExplosions() {
   }
 }
 
-void CrackleAndBoom() {
-  // Crackle phase
-  for (int i = 0; i < 6; i++) {
-    int freq = random(800, 1600);
-    M5Cardputer.Speaker.tone(freq, 20);
-    delay(15);
-  }
+void startCrackleAndBoom() {
+  crackleActive = true;
+  crackleStart = millis();
+  crackleStep = 0;
+  boomPhase = false;
+  lastCrackleTime = millis();
+}
 
-  // Boom phase
-  for (int freq = 1000; freq >= 200; freq -= 100) {
-    M5Cardputer.Speaker.tone(freq, 30);
-    delay(20);
+void updateCrackleAndBoom() {
+  if (!crackleActive) return;
+
+  unsigned long now = millis();
+
+  if (!boomPhase) {
+    // Crackle phase (6 quick random tones)
+    if (crackleStep < 6 && now - lastCrackleTime >= 15) {
+      int freq = random(800, 1600);
+      M5Cardputer.Speaker.tone(freq, 20);
+      lastCrackleTime = now;
+      crackleStep++;
+    } else if (crackleStep >= 6) {
+      boomPhase = true;
+      crackleStep = 1000;  // start freq for boom
+      lastCrackleTime = now;
+    }
+  } else {
+    // Boom phase (descending tone)
+    if (crackleStep >= 200 && now - lastCrackleTime >= 20) {
+      M5Cardputer.Speaker.tone(crackleStep, 30);
+      lastCrackleTime = now;
+      crackleStep -= 100;
+    } else if (crackleStep < 200) {
+      crackleActive = false;
+    }
   }
 }
 
@@ -369,11 +401,24 @@ void loop() {
             bulletActive = false;
             score += 10;
             spawnExplosion(a.x + alienW / 2, a.y + alienH / 2, ORANGE);
-            // M5Cardputer.Speaker.tone(300, 100);
-            CrackleAndBoom();
+            startCrackleAndBoom();
           }
         }
       }
+    }
+
+    if (shipHit) {
+      clearExplosions();
+      drawExplosions();
+      if (millis() - shipExplosionStart >= shipExplosionDuration) {
+        shipHit = false;
+        if (pendingGameOver) {
+          showGameOver();
+        } else {
+                shipX = SCREEN_W / 2 - 5;
+        }
+      }
+      return;  // Skip rest of game logic during explosion
     }
 
     for (int i = 0; i < maxAlienBullets; i++) {
@@ -385,9 +430,14 @@ void loop() {
           alienBullets[i].x >= shipX && alienBullets[i].x <= (shipX + shipW) && alienBullets[i].y >= shipY && alienBullets[i].y <= (shipY + shipH)) {
           alienBullets[i].active = false;
           spawnExplosion(shipX + shipW / 2, shipY + shipH / 2, RED);
+          shipHit = true;
+          shipExplosionStart = millis();
+          startCrackleAndBoom();
+
           lives--;
-          // M5Cardputer.Speaker.tone(200, 300);
-          CrackleAndBoom(); 
+          if (lives <= 0) {
+            pendingGameOver = true;  // defer showing Game Over
+          }
         }
       }
     }
@@ -432,8 +482,7 @@ void loop() {
 
     if (aliensReachedPlayer()) {
       lives--;
-      // M5Cardputer.Speaker.tone(200, 300);
-      CrackleAndBoom(); 
+      startCrackleAndBoom();
       if (lives <= 0) showGameOver();
       initAliens();
     }
@@ -449,8 +498,7 @@ void loop() {
         bulletActive = false;
         spawnExplosion(mothershipX + mothershipW / 2, mothershipY + mothershipH / 2, MAGENTA);
         score += 50;
-        // M5Cardputer.Speaker.tone(1500, 150);
-        CrackleAndBoom();
+        startCrackleAndBoom();
         showBonus = true;
         bonusStart = millis();
         bonusX = mothershipX + mothershipW / 2;
@@ -463,6 +511,8 @@ void loop() {
     drawAliens();
     drawExplosions();
     drawAlienBullets();
+
+    updateCrackleAndBoom();
 
     // Mothership spawn logic
     if (!mothershipActive && millis() - lastMothershipSpawn > mothershipSpawnInterval) {
