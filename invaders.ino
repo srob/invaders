@@ -237,6 +237,21 @@ void clearExplosions() {
   }
 }
 
+void CrackleAndBoom() {
+  // Crackle phase
+  for (int i = 0; i < 6; i++) {
+    int freq = random(800, 1600);
+    M5Cardputer.Speaker.tone(freq, 20);
+    delay(15);
+  }
+
+  // Boom phase
+  for (int freq = 1000; freq >= 200; freq -= 100) {
+    M5Cardputer.Speaker.tone(freq, 30);
+    delay(20);
+  }
+}
+
 void fireAlienBullet(int x, int y) {
   for (int i = 0; i < maxAlienBullets; i++) {
     if (!alienBullets[i].active) {
@@ -354,7 +369,8 @@ void loop() {
             bulletActive = false;
             score += 10;
             spawnExplosion(a.x + alienW / 2, a.y + alienH / 2, ORANGE);
-            M5Cardputer.Speaker.tone(300, 100);
+            // M5Cardputer.Speaker.tone(300, 100);
+            CrackleAndBoom();
           }
         }
       }
@@ -370,7 +386,8 @@ void loop() {
           alienBullets[i].active = false;
           spawnExplosion(shipX + shipW / 2, shipY + shipH / 2, RED);
           lives--;
-          M5Cardputer.Speaker.tone(200, 300);
+          // M5Cardputer.Speaker.tone(200, 300);
+          CrackleAndBoom(); 
         }
       }
     }
@@ -415,7 +432,8 @@ void loop() {
 
     if (aliensReachedPlayer()) {
       lives--;
-      M5Cardputer.Speaker.tone(200, 300);
+      // M5Cardputer.Speaker.tone(200, 300);
+      CrackleAndBoom(); 
       if (lives <= 0) showGameOver();
       initAliens();
     }
@@ -431,7 +449,8 @@ void loop() {
         bulletActive = false;
         spawnExplosion(mothershipX + mothershipW / 2, mothershipY + mothershipH / 2, MAGENTA);
         score += 50;
-        M5Cardputer.Speaker.tone(1500, 150);
+        // M5Cardputer.Speaker.tone(1500, 150);
+        CrackleAndBoom();
         showBonus = true;
         bonusStart = millis();
         bonusX = mothershipX + mothershipW / 2;
