@@ -1,7 +1,12 @@
 #include <M5Cardputer.h>
+#include <Preferences.h>
 
 const int SCREEN_W = 240;
 const int SCREEN_H = 135;
+
+Preferences preferences;
+
+int volumeLevel;
 
 // Player / ship
 int shipX = SCREEN_W / 2 - 5;
@@ -66,16 +71,17 @@ const unsigned long mothershipSpawnInterval = 15000;  // every 15 seconds
 unsigned long lastMothershipSound = 0;
 const int mothershipSoundInterval = 300;  // ms between beeps
 
-
 struct Explosion {
   int x, y;
   int frame;
   bool active;
   uint16_t color;
+  unsigned long lastFrameTime;
+  int framesTotal;
 };
 
 const int maxExplosions = 10;
-const int explosionFrames = 4;
+const int explosionFrames = 6;
 Explosion explosions[maxExplosions];
 
 bool crackleActive = false;
@@ -210,13 +216,26 @@ bool aliensReachedPlayer() {
 }
 
 void drawExplosions() {
+  unsigned long now = millis();
   for (int i = 0; i < maxExplosions; i++) {
     if (explosions[i].active) {
-      explosions[i].frame++;
-      if (explosions[i].frame >= explosionFrames) {
-        explosions[i].active = false;
-        continue;
+      // Check if it's time to update this explosion frame
+      if (now - explosions[i].lastFrameTime >= 100) {
+        // Clear previous frame before updating
+        int oldSize = 4 + explosions[i].frame * 4;
+        int oldHalf = oldSize / 2;
+        M5Cardputer.Display.fillCircle(explosions[i].x, explosions[i].y, oldHalf, BLACK);
+
+        explosions[i].frame++;
+        explosions[i].lastFrameTime = now;
+
+        if (explosions[i].frame >= explosions[i].framesTotal) {
+          explosions[i].active = false;
+          continue;  // Don’t draw below
+        }
       }
+
+      // Draw new frame
       int size = 4 + explosions[i].frame * 4;
       int half = size / 2;
       M5Cardputer.Display.fillCircle(explosions[i].x, explosions[i].y, half, explosions[i].color);
@@ -224,7 +243,7 @@ void drawExplosions() {
   }
 }
 
-void spawnExplosion(int x, int y, uint16_t color) {
+void spawnExplosion(int x, int y, uint16_t color, int frames) {
   for (int i = 0; i < maxExplosions; i++) {
     if (!explosions[i].active) {
       explosions[i].x = x;
@@ -232,6 +251,8 @@ void spawnExplosion(int x, int y, uint16_t color) {
       explosions[i].frame = 0;
       explosions[i].active = true;
       explosions[i].color = color;
+      explosions[i].lastFrameTime = millis();
+      explosions[i].framesTotal = frames;
       break;
     }
   }
@@ -343,6 +364,18 @@ void setup() {
   M5Cardputer.Display.setTextSize(1);
   M5Cardputer.Display.fillScreen(BLACK);
   initAliens();
+
+  preferences.begin("settings", true);  // true = read-only
+  int savedVol = preferences.getInt("volume", -1);
+  preferences.end();
+
+  if (savedVol >= 0 && savedVol <= 255) {
+    volumeLevel = savedVol;
+  } else {
+    volumeLevel = map(3, 0, 9, 0, 255);  // default to key 3 volume
+  }
+
+  M5Cardputer.Speaker.setVolume(volumeLevel);
 }
 
 void loop() {
@@ -361,6 +394,15 @@ void loop() {
     // Handle key press (fire bullet or movement start)
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
       for (char key : keys.word) {
+        if (key >= '0' && key <= '9') {
+          // Map key '0'–'9' to volume 0–255
+          volumeLevel = map(key - '0', 0, 9, 0, 255);
+          preferences.begin("settings", false); // false = write mode
+          preferences.putInt("volume", volumeLevel);
+          preferences.end();
+          M5Cardputer.Speaker.setVolume(volumeLevel);
+        }
+
         if (key == 'a' || key == 'd') {
           lastMoveKey = key;
           lastMoveTime = now;
@@ -390,35 +432,52 @@ void loop() {
       lastMoveKey = 0;
     }
 
-    if (bulletActive) {
-      bulletY -= 5;
-      if (bulletY < 0) bulletActive = false;
-      for (int row = 0; row < numRows; row++) {
-        for (int col = 0; col < numCols; col++) {
-          Alien &a = aliens[row][col];
-          if (a.alive && checkCollision(a)) {
-            a.alive = false;
-            bulletActive = false;
-            score += 10;
-            spawnExplosion(a.x + alienW / 2, a.y + alienH / 2, ORANGE);
-            startCrackleAndBoom();
-          }
-        }
-      }
-    }
+    bool skipShipLogic = false;
 
     if (shipHit) {
       clearExplosions();
       drawExplosions();
-      if (millis() - shipExplosionStart >= shipExplosionDuration) {
+      skipShipLogic = true;
+
+      // Wait for all explosions to complete before ending the hit state
+      bool shipExplosionOngoing = false;
+      for (int i = 0; i < maxExplosions; i++) {
+        if (explosions[i].active) {
+          shipExplosionOngoing = true;
+          break;
+        }
+      }
+
+      if (!shipExplosionOngoing) {
         shipHit = false;
         if (pendingGameOver) {
           showGameOver();
         } else {
-                shipX = SCREEN_W / 2 - 5;
+          shipX = SCREEN_W / 2 - 5;
         }
       }
-      return;  // Skip rest of game logic during explosion
+    }
+
+    if (!skipShipLogic) {
+
+      drawShip();
+
+      if (bulletActive) {
+        bulletY -= 5;
+        if (bulletY < 0) bulletActive = false;
+        for (int row = 0; row < numRows; row++) {
+          for (int col = 0; col < numCols; col++) {
+            Alien &a = aliens[row][col];
+            if (a.alive && checkCollision(a)) {
+              a.alive = false;
+              bulletActive = false;
+              score += 10;
+              spawnExplosion(a.x + alienW / 2, a.y + alienH / 2, ORANGE, explosionFrames);
+              startCrackleAndBoom();
+            }
+          }
+        }
+      }
     }
 
     for (int i = 0; i < maxAlienBullets; i++) {
@@ -429,7 +488,11 @@ void loop() {
         } else if (
           alienBullets[i].x >= shipX && alienBullets[i].x <= (shipX + shipW) && alienBullets[i].y >= shipY && alienBullets[i].y <= (shipY + shipH)) {
           alienBullets[i].active = false;
-          spawnExplosion(shipX + shipW / 2, shipY + shipH / 2, RED);
+          if (lives == 1) {
+            spawnExplosion(shipX + shipW / 2, shipY + shipH / 2, MAGENTA, 12);  // more frames
+          } else {
+            spawnExplosion(shipX + shipW / 2, shipY + shipH / 2, RED, explosionFrames);
+          }
           shipHit = true;
           shipExplosionStart = millis();
           startCrackleAndBoom();
@@ -496,7 +559,7 @@ void loop() {
       if (bulletX >= mothershipX && bulletX <= (mothershipX + mothershipW) && bulletY >= mothershipY && bulletY <= (mothershipY + mothershipH)) {
         mothershipActive = false;
         bulletActive = false;
-        spawnExplosion(mothershipX + mothershipW / 2, mothershipY + mothershipH / 2, MAGENTA);
+        spawnExplosion(mothershipX + mothershipW / 2, mothershipY + mothershipH / 2, MAGENTA, explosionFrames);
         score += 50;
         startCrackleAndBoom();
         showBonus = true;
@@ -548,7 +611,21 @@ void loop() {
     drawBonusText();
 
     if (lives <= 0) {
+      pendingGameOver = true;
+    }
+  }
+  // Only show Game Over when all explosions are finished animating
+  if (pendingGameOver) {
+    bool explosionsRemaining = false;
+    for (int i = 0; i < maxExplosions; i++) {
+      if (explosions[i].active) {
+        explosionsRemaining = true;
+        break;
+      }
+    }
+    if (!explosionsRemaining) {
       showGameOver();
+      pendingGameOver = false;
     }
   }
 }
