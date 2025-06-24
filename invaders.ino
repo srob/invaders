@@ -4,13 +4,15 @@
 #define ENABLE_DEBUG 1  // Set to 0 to disable all debug output
 
 #if ENABLE_DEBUG
-  #define DEBUG_BEGIN()     Serial.begin(115200); while (!Serial && millis() < 2000)
-  #define DEBUG_PRINT(x)    Serial.print(x)
-  #define DEBUG_PRINTLN(x)  Serial.println(x)
+#define DEBUG_BEGIN() \
+  Serial.begin(115200); \
+  while (!Serial && millis() < 2000)
+#define DEBUG_PRINT(x) Serial.print(x)
+#define DEBUG_PRINTLN(x) Serial.println(x)
 #else
-  #define DEBUG_BEGIN()
-  #define DEBUG_PRINT(x)
-  #define DEBUG_PRINTLN(x)
+#define DEBUG_BEGIN()
+#define DEBUG_PRINT(x)
+#define DEBUG_PRINTLN(x)
 #endif
 
 const int SCREEN_W = 240;
@@ -20,8 +22,11 @@ Preferences preferences;
 
 int volumeLevel;
 
-char highScoreName[9] = "--------";  // 8 chars + null terminator
-int highScore = 0;
+char sessionName[11] = "";  // Up to 10 characters, null-terminated
+
+const int leaderboardSize = 4;
+int highScores[leaderboardSize];
+char highScoreNames[leaderboardSize][11];  // 10 chars + null terminator
 
 // Player / ship
 int shipX = SCREEN_W / 2 - 5;
@@ -348,41 +353,101 @@ void drawAlienBullets() {
 }
 
 void showGameOver() {
-  // Retrieve high score and name
-  preferences.begin("settings", true);  // read-only
-  int highscore = preferences.getInt("highscore", 0);
-  String highscoreName = preferences.getString("highscore_name", "Anonymous");
-  preferences.end();
-
   M5Cardputer.Display.fillScreen(BLACK);
+  M5Cardputer.Display.setCursor(30, 20);
   M5Cardputer.Display.setTextColor(WHITE);
   M5Cardputer.Display.setTextSize(2);
-
-  int textWidth = 12 * strlen("GAME OVER");
-  M5Cardputer.Display.setCursor((SCREEN_W - textWidth) / 2, 20);
   M5Cardputer.Display.println("GAME OVER");
 
-  M5Cardputer.Display.setTextSize(1);
+  delay(1000);  // Pause before showing leaderboard
 
-  // Show player's score
-  M5Cardputer.Display.setCursor(30, 60);
+  M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.setCursor(30, 50);
   M5Cardputer.Display.print("Your score: ");
   M5Cardputer.Display.println(score);
 
-  // Show high score
-  M5Cardputer.Display.setCursor(30, 80);
-  M5Cardputer.Display.print("High score: ");
-  M5Cardputer.Display.print(highscoreName);
-  M5Cardputer.Display.print(" ");
-  M5Cardputer.Display.println(highscore);
+  M5Cardputer.Display.println();
+  M5Cardputer.Display.println("  HIGH SCORES");
 
-  // Reset instructions
-  M5Cardputer.Display.setCursor(30, 110);
-  M5Cardputer.Display.println("Reset to try again");
+  for (int i = 0; i < leaderboardSize; i++) {
+    M5Cardputer.Display.setCursor(30, 80 + i * 10);
+    M5Cardputer.Display.printf("%d. %-10s %4d\n", i + 1, highScoreNames[i], highScores[i]);
+  }
 
-  while (true)
-    ;
+  M5Cardputer.Display.println();
+  M5Cardputer.Display.println("  Press any key to restart");
+
+  // Wait for any key
+  while (true) {
+    M5Cardputer.update();
+    if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
+      break;
+    }
+  }
+
+  // clear screen before restarting the game
+  M5Cardputer.Display.fillScreen(BLACK);
+
+  // clear the game over flag
+  pendingGameOver = false;
+
+  // reset for new game
+  lives = 3;
+  score = 0;
+  bulletActive = false;
+  mothershipActive = false;
+  initAliens();
+  shipX = SCREEN_W / 2 - shipW / 2;
 }
+
+void updateLeaderboard(int newScore, const char *newName) {
+  int insertPos = -1;
+
+  // Find the correct position to insert
+  for (int i = 0; i < leaderboardSize; i++) {
+    if (newScore > highScores[i]) {
+      insertPos = i;
+      break;
+    }
+  }
+
+  // If not a high score, do nothing
+  if (insertPos == -1) {
+    DEBUG_PRINTLN("Score did not qualify for leaderboard");
+    return;
+  }
+
+  DEBUG_PRINT("New high score qualifies at position ");
+  DEBUG_PRINTLN(insertPos);
+
+  // Shift lower scores down
+  for (int i = leaderboardSize - 1; i > insertPos; i--) {
+    highScores[i] = highScores[i - 1];
+    strncpy(highScoreNames[i], highScoreNames[i - 1], sizeof(highScoreNames[i]));
+  }
+
+  // Insert new score
+  highScores[insertPos] = newScore;
+  strncpy(highScoreNames[insertPos], newName, sizeof(highScoreNames[insertPos]));
+  highScoreNames[insertPos][sizeof(highScoreNames[insertPos]) - 1] = '\0';  // Null-terminate
+
+  DEBUG_PRINTLN("Leaderboard updated. Saving...");
+
+  // Save to preferences
+  preferences.begin("settings", false);
+  for (int i = 0; i < leaderboardSize; i++) {
+    String scoreKey = " score" + String(i);
+    String nameKey = "name" + String(i);
+    preferences.putInt(scoreKey.c_str(), highScores[i]);
+    preferences.putString(nameKey.c_str(), highScoreNames[i]);
+    strncpy(sessionName, newName, sizeof(sessionName));
+    sessionName[sizeof(sessionName) - 1] = '\0';
+  }
+  preferences.end();
+
+  DEBUG_PRINTLN("Leaderboard saved");
+}
+
 
 void drawBonusText() {
   if (showBonus && millis() - bonusStart < bonusDuration) {
@@ -397,25 +462,38 @@ void drawBonusText() {
 }
 
 void handleGameOver() {
-  if (score > highScore) {
-    promptHighScoreName();  // Ask for name and save to preferences
-    highScore = score;      // Update local highScore so display is correct
+  if (score > highScores[leaderboardSize - 1]) {
+    const char *name = promptHighScoreName();
+    updateLeaderboard(score, name);
   }
-  showGameOver();           // Then show final screen with score + high score
+  showGameOver();
 }
 
-void promptHighScoreName() {
-  char nameBuffer[11] = "";  // max 10 chars + null terminator
+const char *promptHighScoreName() {
+  static char nameBuffer[11] = "";  // Persistent between calls
   int nameLen = 0;
 
+  // Pre-fill with previous session name if available
+  if (strlen(sessionName) > 0) {
+    strncpy(nameBuffer, sessionName, sizeof(nameBuffer));
+    nameBuffer[sizeof(nameBuffer) - 1] = '\0';
+    nameLen = strlen(nameBuffer);
+  }
+
   M5Cardputer.Display.fillScreen(BLACK);
-  M5Cardputer.Display.setCursor(10, 30);
+  M5Cardputer.Display.setCursor(10, 20);
   M5Cardputer.Display.setTextColor(WHITE);
   M5Cardputer.Display.setTextSize(1);
-  M5Cardputer.Display.println("NEW HIGH SCORE!");
+  M5Cardputer.Display.println("  NEW HIGH SCORE!");
   M5Cardputer.Display.println();
-  M5Cardputer.Display.println("Enter your name:");
-  M5Cardputer.Display.println("(press # to finish)");
+  M5Cardputer.Display.println("  Enter your name:");
+  M5Cardputer.Display.println("  # = Finish   < = Delete");
+  M5Cardputer.Display.println("  * = Reset Leaderboard");
+
+  // Initial name display
+  M5Cardputer.Display.fillRect(10, 100, SCREEN_W - 20, 10, BLACK);
+  M5Cardputer.Display.setCursor(10, 100);
+  M5Cardputer.Display.print(nameBuffer);
 
   while (true) {
     M5Cardputer.update();
@@ -423,32 +501,57 @@ void promptHighScoreName() {
 
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
       for (char key : keys.word) {
-        if (key == '#' && nameLen > 0) {  // Use '#' as finish key
+        DEBUG_PRINT("Key: ");
+        DEBUG_PRINT(key);
+        DEBUG_PRINT(" (code ");
+        DEBUG_PRINT((int)key);
+        DEBUG_PRINTLN(")");
+
+        // Finish
+        if (key == '#' && nameLen > 0) {
           nameBuffer[nameLen] = '\0';
-
-          // Save high score name and value
-          preferences.begin("settings", false);
-          preferences.putInt("highscore", score);
-          preferences.putString("highscore_name", nameBuffer);
-          preferences.end();
-
-          return;
+          return nameBuffer;
         }
 
-        if (key == '<' && nameLen > 0) {  // Use '<' as backspace
+        // Backspace
+        if (key == '<' && nameLen > 0) {
           nameLen--;
           nameBuffer[nameLen] = '\0';
+          continue;
         }
 
-        // Accept only printable characters
-        if (nameLen < 10 && isPrintable(key) && key != '#') {
+        // Reset leaderboard
+        if (key == '*') {
+          DEBUG_PRINTLN("Resetting leaderboard...");
+          preferences.begin("settings", false);
+          for (int i = 0; i < leaderboardSize; i++) {
+            String scoreKey = "score" + String(i);
+            String nameKey = "name" + String(i);
+            preferences.putInt(scoreKey.c_str(), 0);
+            preferences.putString(nameKey.c_str(), "");
+            highScores[i] = 0;
+            highScoreNames[i][0] = '\0';
+          }
+          preferences.end();
+
+          // Confirmation message
+          M5Cardputer.Display.fillRect(10, 110, SCREEN_W - 20, 10, BLACK);
+          M5Cardputer.Display.setCursor(10, 110);
+          M5Cardputer.Display.setTextColor(GREEN);
+          M5Cardputer.Display.print("Leaderboard reset!");
+          delay(1000); // Small pause for user to see
+          M5Cardputer.Display.setTextColor(WHITE);
+        }
+
+        // Character entry
+        if (nameLen < 10 && isPrintable(key) && key != '#' && key != '*') {
           nameBuffer[nameLen++] = key;
           nameBuffer[nameLen] = '\0';
         }
 
         // Redraw name entry line
-        M5Cardputer.Display.fillRect(10, 90, SCREEN_W - 20, 10, BLACK);
-        M5Cardputer.Display.setCursor(10, 90);
+        M5Cardputer.Display.fillRect(10, 100, SCREEN_W - 20, 10, BLACK);
+        M5Cardputer.Display.setCursor(10, 100);
         M5Cardputer.Display.print(nameBuffer);
       }
     }
@@ -485,13 +588,26 @@ void setup() {
   }
   M5Cardputer.Speaker.setVolume(volumeLevel);
 
-  // Load high score and name
-  highScore = preferences.getInt("highscore", 0);
-  preferences.getBytes("hsname", highScoreName, sizeof(highScoreName));
-  DEBUG_PRINT("Loaded high score: ");
-  DEBUG_PRINTLN(highScore);
-  DEBUG_PRINT("High score name: ");
-  DEBUG_PRINTLN(highScoreName);
+  // remove legacy high score if present
+  preferences.remove("highscore");
+  preferences.remove("hsname");
+
+  // Load leaderboard entries
+  for (int i = 0; i < leaderboardSize; i++) {
+    String scoreKey = "score" + String(i);
+    String nameKey = "name" + String(i);
+
+    highScores[i] = preferences.getInt(scoreKey.c_str(), 0);
+    String loadedName = preferences.getString(nameKey.c_str(), "--------");
+    loadedName.toCharArray(highScoreNames[i], sizeof(highScoreNames[i]));
+
+    DEBUG_PRINT("Leaderboard entry ");
+    DEBUG_PRINT(i);
+    DEBUG_PRINT(": ");
+    DEBUG_PRINT(highScoreNames[i]);
+    DEBUG_PRINT(" - ");
+    DEBUG_PRINTLN(highScores[i]);
+  }
 
   preferences.end();
   DEBUG_PRINTLN("Preferences closed");
@@ -518,7 +634,7 @@ void loop() {
         if (key >= '0' && key <= '9') {
           // Map key '0'–'9' to volume 0–255
           volumeLevel = map(key - '0', 0, 9, 0, 255);
-          preferences.begin("settings", false); // false = write mode
+          preferences.begin("settings", false);  // false = write mode
           preferences.putInt("volume", volumeLevel);
           preferences.end();
           M5Cardputer.Speaker.setVolume(volumeLevel);
