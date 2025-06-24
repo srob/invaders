@@ -188,8 +188,8 @@ void clearAliens() {
 }
 
 void drawScore() {
-  M5Cardputer.Display.fillRect(0, 0, 80, 10, BLACK);
-  M5Cardputer.Display.setCursor(0, 0);
+  M5Cardputer.Display.fillRect(10, 0, 80, 10, BLACK);
+  M5Cardputer.Display.setCursor(10, 0);
   M5Cardputer.Display.setTextColor(WHITE);
   M5Cardputer.Display.print("Score: ");
   M5Cardputer.Display.print(score);
@@ -198,7 +198,6 @@ void drawScore() {
 void drawLives() {
   M5Cardputer.Display.fillRect(100, 0, 80, 10, BLACK);
   M5Cardputer.Display.setCursor(100, 0);
-  M5Cardputer.Display.setTextColor(WHITE);
   M5Cardputer.Display.print("Lives: ");
   M5Cardputer.Display.print(lives);
 }
@@ -469,90 +468,59 @@ void handleGameOver() {
   showGameOver();
 }
 
-const char *promptHighScoreName() {
-  static char nameBuffer[11] = "";  // Persistent between calls
-  int nameLen = 0;
+const char* promptHighScoreName() {
+  static char nameBuf[11] = "";  // Persistent
+  int nameLen = strlen(nameBuf);
 
-  // Pre-fill with previous session name if available
-  if (strlen(sessionName) > 0) {
-    strncpy(nameBuffer, sessionName, sizeof(nameBuffer));
-    nameBuffer[sizeof(nameBuffer) - 1] = '\0';
-    nameLen = strlen(nameBuffer);
-  }
+  const int marginLeft = 10;
+  const int lineHeight = 12;
+  const int inputY = 70;
 
   M5Cardputer.Display.fillScreen(BLACK);
-  M5Cardputer.Display.setCursor(10, 20);
   M5Cardputer.Display.setTextColor(WHITE);
   M5Cardputer.Display.setTextSize(1);
-  M5Cardputer.Display.println("  NEW HIGH SCORE!");
-  M5Cardputer.Display.println();
-  M5Cardputer.Display.println("  Enter your name:");
-  M5Cardputer.Display.println("  # = Finish   < = Delete");
-  M5Cardputer.Display.println("  * = Reset Leaderboard");
 
-  // Initial name display
-  M5Cardputer.Display.fillRect(10, 100, SCREEN_W - 20, 10, BLACK);
-  M5Cardputer.Display.setCursor(10, 100);
-  M5Cardputer.Display.print(nameBuffer);
+  M5Cardputer.Display.setCursor(marginLeft, 20);
+  M5Cardputer.Display.println("NEW HIGH SCORE!");
+
+  M5Cardputer.Display.setCursor(marginLeft, 20 + lineHeight);
+  M5Cardputer.Display.println("Enter: OK    Del: Delete");
 
   while (true) {
     M5Cardputer.update();
-    auto keys = M5Cardputer.Keyboard.keysState();
 
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
-      for (char key : keys.word) {
-        DEBUG_PRINT("Key: ");
-        DEBUG_PRINT(key);
-        DEBUG_PRINT(" (code ");
-        DEBUG_PRINT((int)key);
-        DEBUG_PRINTLN(")");
+      auto st = M5Cardputer.Keyboard.keysState();
 
-        // Finish
-        if (key == '#' && nameLen > 0) {
-          nameBuffer[nameLen] = '\0';
-          return nameBuffer;
+      // Backspace
+      if (st.del && nameLen > 0) {
+        nameBuf[--nameLen] = '\0';
+      }
+
+      // Enter (finish)
+      if (st.enter && nameLen > 0) {
+        M5Cardputer.Display.fillRect(marginLeft, inputY, SCREEN_W - 2 * marginLeft, lineHeight, BLACK);
+        return nameBuf;
+      }
+
+      // Add printable characters
+      for (char c : st.word) {
+        if (isPrintable(c) && nameLen < 10) {
+          nameBuf[nameLen++] = c;
+          nameBuf[nameLen] = '\0';
         }
+      }
 
-        // Backspace
-        if (key == '<' && nameLen > 0) {
-          nameLen--;
-          nameBuffer[nameLen] = '\0';
-          continue;
-        }
+      // Redraw input
+      M5Cardputer.Display.fillRect(marginLeft, inputY, SCREEN_W - 2 * marginLeft, lineHeight, BLACK);
+      M5Cardputer.Display.setCursor(marginLeft, inputY);
+      M5Cardputer.Display.print("> ");
+      M5Cardputer.Display.print(nameBuf);
 
-        // Reset leaderboard
-        if (key == '*') {
-          DEBUG_PRINTLN("Resetting leaderboard...");
-          preferences.begin("settings", false);
-          for (int i = 0; i < leaderboardSize; i++) {
-            String scoreKey = "score" + String(i);
-            String nameKey = "name" + String(i);
-            preferences.putInt(scoreKey.c_str(), 0);
-            preferences.putString(nameKey.c_str(), "");
-            highScores[i] = 0;
-            highScoreNames[i][0] = '\0';
-          }
-          preferences.end();
-
-          // Confirmation message
-          M5Cardputer.Display.fillRect(10, 110, SCREEN_W - 20, 10, BLACK);
-          M5Cardputer.Display.setCursor(10, 110);
-          M5Cardputer.Display.setTextColor(GREEN);
-          M5Cardputer.Display.print("Leaderboard reset!");
-          delay(1000); // Small pause for user to see
-          M5Cardputer.Display.setTextColor(WHITE);
-        }
-
-        // Character entry
-        if (nameLen < 10 && isPrintable(key) && key != '#' && key != '*') {
-          nameBuffer[nameLen++] = key;
-          nameBuffer[nameLen] = '\0';
-        }
-
-        // Redraw name entry line
-        M5Cardputer.Display.fillRect(10, 100, SCREEN_W - 20, 10, BLACK);
-        M5Cardputer.Display.setCursor(10, 100);
-        M5Cardputer.Display.print(nameBuffer);
+      // Blinking cursor
+      if ((millis() / 500) % 2 && nameLen < 10) {
+        int cursorX = marginLeft + 12 + nameLen * 6; // "> " is ~2 chars
+        M5Cardputer.Display.drawFastHLine(cursorX, inputY + 10, 6, WHITE);
       }
     }
   }
@@ -587,10 +555,6 @@ void setup() {
     DEBUG_PRINTLN("No valid saved volume found. Defaulting to key 3 volume.");
   }
   M5Cardputer.Speaker.setVolume(volumeLevel);
-
-  // remove legacy high score if present
-  preferences.remove("highscore");
-  preferences.remove("hsname");
 
   // Load leaderboard entries
   for (int i = 0; i < leaderboardSize; i++) {
