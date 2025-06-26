@@ -1,7 +1,7 @@
 #include <M5Cardputer.h>
 #include <Preferences.h>
 
-#define ENABLE_DEBUG 1  // Set to 0 to disable all debug output
+#define ENABLE_DEBUG 0  // Set to 0 to disable all debug output
 
 #if ENABLE_DEBUG
 #define DEBUG_BEGIN() \
@@ -60,7 +60,7 @@ int alienDir = 1;
 bool alienAnimationFrame = false;
 
 unsigned long lastAlienMove = 0;
-const int alienMoveInterval = 400;
+unsigned long alienMoveInterval = 400;  // starting speed (in ms)
 
 struct Alien {
   int x, y;
@@ -189,19 +189,22 @@ void clearAliens() {
   }
 }
 
-void drawScore() {
-  M5Cardputer.Display.fillRect(10, 0, 80, 10, BLACK);
-  M5Cardputer.Display.setCursor(10, 0);
-  M5Cardputer.Display.setTextColor(WHITE);
-  M5Cardputer.Display.print("Score: ");
-  M5Cardputer.Display.print(score);
-}
+void drawScoreAndLives() {
+  char buffer[32];
+  snprintf(buffer, sizeof(buffer), "Score: %3d   Lives: %d", score, lives);
 
-void drawLives() {
-  M5Cardputer.Display.fillRect(100, 0, 80, 10, BLACK);
-  M5Cardputer.Display.setCursor(100, 0);
-  M5Cardputer.Display.print("Lives: ");
-  M5Cardputer.Display.print(lives);
+  int textSize = 1; // Assuming setTextSize(1)
+  int charWidth = 6 * textSize; // 6 pixels per char in default font
+  int textWidth = strlen(buffer) * charWidth;
+  int x = (SCREEN_W - textWidth) / 2;
+
+  // Clear a wide enough area to overwrite previous text
+  M5Cardputer.Display.fillRect(0, 2, SCREEN_W, 12, BLACK);
+
+  M5Cardputer.Display.setTextSize(textSize);
+  M5Cardputer.Display.setTextColor(WHITE);
+  M5Cardputer.Display.setCursor(x, 1);
+  M5Cardputer.Display.print(buffer);
 }
 
 void fireBullet() {
@@ -366,21 +369,39 @@ void resetHighScores() {
 
 void showHighScores(const char *title = "HIGH SCORES") {
   M5Cardputer.Display.fillScreen(BLACK);
-  M5Cardputer.Display.setTextSize(2);
-  M5Cardputer.Display.setCursor(30, 20);
-  M5Cardputer.Display.setTextColor(WHITE);
-  M5Cardputer.Display.println(title);
 
+  // --- Title ---
+  M5Cardputer.Display.setTextSize(2);
+  M5Cardputer.Display.setTextColor(RED);
+  int titleLen = strlen(title);
+  int titleWidth = titleLen * 12;  // Approximate for size 2
+  int titleX = (SCREEN_W - titleWidth) / 2;
+  M5Cardputer.Display.setCursor(titleX, 15);
+  M5Cardputer.Display.print(title);
+
+  // --- High Score List ---
   M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.setTextColor(WHITE);
+  int y = 50;
+
   for (int i = 0; i < leaderboardSize; i++) {
-    M5Cardputer.Display.setCursor(30, 60 + i * 10);
-    M5Cardputer.Display.printf("%d. %-10s %4d", i + 1, highScoreNames[i], highScores[i]);
+    char line[32];
+    snprintf(line, sizeof(line), "%d. %-10s %5d", i + 1, highScoreNames[i], highScores[i]);
+    M5Cardputer.Display.setCursor(20, y);
+    M5Cardputer.Display.print(line);
+    y += 15;
   }
 
-  M5Cardputer.Display.setCursor(30, 60 + leaderboardSize * 10 + 10);
-  M5Cardputer.Display.println("Press R to reset");
-  M5Cardputer.Display.println("Any other key to continue");
+  // --- Instructions ---
+  const char *instr = "R Reset, Any other key Continue";
+  int instrLen = strlen(instr);
+  int instrWidth = instrLen * 6;  // Approximate for size 1
+  int instrX = (SCREEN_W - instrWidth) / 2;
+  M5Cardputer.Display.setCursor(instrX, SCREEN_H - 20);
+  M5Cardputer.Display.setTextColor(GREEN);
+  M5Cardputer.Display.print(instr);
 
+  // --- Wait for Input ---
   while (true) {
     M5Cardputer.update();
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
@@ -391,17 +412,14 @@ void showHighScores(const char *title = "HIGH SCORES") {
           showHighScores("HIGH SCORES RESET");
           return;
         } else {
-          // Clear screen before restarting game
+          // Clear screen and reset game
           M5Cardputer.Display.fillScreen(BLACK);
-
-          // Reset game state
           lives = 3;
           score = 0;
           bulletActive = false;
           mothershipActive = false;
           initAliens();
           shipX = SCREEN_W / 2 - shipW / 2;
-
           return;
         }
       }
@@ -410,89 +428,60 @@ void showHighScores(const char *title = "HIGH SCORES") {
 }
 
 void showGameOverScreen() {
+  const char* text = "GAME OVER";
+
   M5Cardputer.Display.fillScreen(BLACK);
   M5Cardputer.Display.setTextColor(RED);
-  M5Cardputer.Display.setTextSize(3);
+  M5Cardputer.Display.setTextSize(3);  // Large text
 
-  // Center the text "GAME OVER"
-  const char* text = "GAME OVER";
-  int16_t x1, y1;
-  uint16_t w, h;
-  M5Cardputer.Display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  int x = (SCREEN_W - w) / 2;
-  int y = (SCREEN_H - h) / 2;
-  M5Cardputer.Display.setCursor(x, y);
+  int charWidth = 6 * 3;   // 6 pixels per char × text size
+  int charHeight = 8 * 3;  // 8 pixels per char × text size
+  int textLen = strlen(text);
+
+  int textWidth = textLen * charWidth;
+  int screenWidth = M5Cardputer.Display.width();
+  int screenHeight = M5Cardputer.Display.height();
+
+  int centerX = (screenWidth - textWidth) / 2;
+  int centerY = (screenHeight - charHeight) / 2;
+
+  M5Cardputer.Display.setCursor(centerX, centerY);
   M5Cardputer.Display.print(text);
 
-  // Wait for any key
-  while (true) {
-    M5Cardputer.update();
-    if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
-      return;
-    }
-  }
+  delay(3000);  // Pause so user sees GAME OVER before moving on
 }
 
-void showGameOver() {
-  showGameOverScreen();  // Step 1: dedicated Game Over screen
-  showHighScores("HIGH SCORES");  // Step 2: standard high scores
-  pendingGameOver = false;
-
-  // Reset game state for new game
-  lives = 3;
-  score = 0;
-  bulletActive = false;
-  mothershipActive = false;
-  initAliens();
-  shipX = SCREEN_W / 2 - shipW / 2;
-}
-
-void updateLeaderboard(int newScore, const char *newName) {
+void updateLeaderboard(int newScore, const char* newName) {
   int insertPos = -1;
 
-  // Find the correct position to insert
-  for (int i = 0; i < leaderboardSize; i++) {
+  // Find insert position
+  for (int i = 0; i < leaderboardSize; ++i) {
     if (newScore > highScores[i]) {
       insertPos = i;
       break;
     }
   }
 
-  // If not a high score, do nothing
-  if (insertPos == -1) {
-    DEBUG_PRINTLN("Score did not qualify for leaderboard");
-    return;
-  }
+  if (insertPos == -1) return;  // Not a high score
 
-  DEBUG_PRINT("New high score qualifies at position ");
-  DEBUG_PRINTLN(insertPos);
-
-  // Shift lower scores down
-  for (int i = leaderboardSize - 1; i > insertPos; i--) {
-    highScores[i] = highScores[i - 1];
-    strncpy(highScoreNames[i], highScoreNames[i - 1], sizeof(highScoreNames[i]));
+  // Shift down to make room
+  for (int j = leaderboardSize - 1; j > insertPos; --j) {
+    highScores[j] = highScores[j - 1];
+    strncpy(highScoreNames[j], highScoreNames[j - 1], sizeof(highScoreNames[j]));
   }
 
   // Insert new score
   highScores[insertPos] = newScore;
   strncpy(highScoreNames[insertPos], newName, sizeof(highScoreNames[insertPos]));
-  highScoreNames[insertPos][sizeof(highScoreNames[insertPos]) - 1] = '\0';  // Null-terminate
+  highScoreNames[insertPos][sizeof(highScoreNames[insertPos]) - 1] = '\0';
 
-  DEBUG_PRINTLN("Leaderboard updated. Saving...");
-
-  // Save to preferences
+  // Store to preferences
   preferences.begin("settings", false);
   for (int i = 0; i < leaderboardSize; i++) {
-    String scoreKey = " score" + String(i);
-    String nameKey = "name" + String(i);
-    preferences.putInt(scoreKey.c_str(), highScores[i]);
-    preferences.putString(nameKey.c_str(), highScoreNames[i]);
-    strncpy(sessionName, newName, sizeof(sessionName));
-    sessionName[sizeof(sessionName) - 1] = '\0';
+    preferences.putInt(("score" + String(i)).c_str(), highScores[i]);
+    preferences.putString(("name" + String(i)).c_str(), highScoreNames[i]);
   }
   preferences.end();
-  showHighScores("HIGH SCORES");
-  DEBUG_PRINTLN("Leaderboard saved");
 }
 
 void drawBonusText() {
@@ -510,12 +499,17 @@ void drawBonusText() {
 void handleGameOver() {
   inGameOverScreen = true;
 
+  showGameOverScreen();
+
   if (score > highScores[leaderboardSize - 1]) {
     const char *name = promptHighScoreName();
+    // Store entered name for reuse later in session
+    strncpy(sessionName, name, sizeof(sessionName));
+    sessionName[sizeof(sessionName) - 1] = '\0';  // Ensure null-terminated
     updateLeaderboard(score, name);
-  } else {
-    showGameOverScreen();
   }
+
+  showHighScores("HIGH SCORES");
 
   // Reset state for new game
   lives = 3;
@@ -528,26 +522,51 @@ void handleGameOver() {
   inGameOverScreen = false;
 }
 
+void playSplashMelody() {
+  int melody[] = { 880, 659, 587, 523 };  // Approx. A5, E5, D5, C5
+  int durations[] = { 150, 150, 150, 300 };  // Slightly longer on the last note
+
+  for (int i = 0; i < 4; i++) {
+    M5Cardputer.Speaker.tone(melody[i], durations[i]);
+    delay(durations[i] + 30);
+  }
+
+  M5Cardputer.Speaker.end();
+}
+
 void showSplashScreen() {
   M5Cardputer.Display.fillScreen(BLACK);
 
-  // Center "INVADERS" title
-  M5Cardputer.Display.setTextSize(3);
+  // Title: INVADERS (centered, red)
   const char *title = "INVADERS";
-  int titleWidth = strlen(title) * 6 * 3;  // 6 pixels per char, times size
-  int titleX = (SCREEN_W - titleWidth) / 2;
+  M5Cardputer.Display.setTextSize(3);
   M5Cardputer.Display.setTextColor(RED);
-  M5Cardputer.Display.setCursor(titleX, 30);
+  int titleWidth = strlen(title) * 6 * 3;
+  int titleX = (SCREEN_W - titleWidth) / 2;
+  M5Cardputer.Display.setCursor(titleX, 25);
   M5Cardputer.Display.println(title);
 
-  // Center "Press any key to start" message
+  // Instructions (green)
   M5Cardputer.Display.setTextSize(1);
-  const char *msg = "Press any key to start";
-  int msgWidth = strlen(msg) * 6;
-  int msgX = (SCREEN_W - msgWidth) / 2;
-  M5Cardputer.Display.setTextColor(WHITE);
-  M5Cardputer.Display.setCursor(msgX, 80);
-  M5Cardputer.Display.println(msg);
+  M5Cardputer.Display.setTextColor(GREEN);
+
+  const char *line1 = "A Left, D Right, Space/F Fire";
+  const char *line2 = "0..9 Set volume, Any other key Start";
+
+  int line1Width = strlen(line1) * 6;
+  int line2Width = strlen(line2) * 6;
+
+  int line1X = (SCREEN_W - line1Width) / 2;
+  int line2X = (SCREEN_W - line2Width) / 2;
+
+  M5Cardputer.Display.setCursor(line1X, 75);
+  M5Cardputer.Display.println(line1);
+
+  M5Cardputer.Display.setCursor(line2X, 90);
+  M5Cardputer.Display.println(line2);
+
+  // Play theme
+  playSplashMelody();
 
   // Wait for key press
   while (true) {
@@ -558,76 +577,96 @@ void showSplashScreen() {
   }
 }
 
-const char *promptHighScoreName() {
-  static char nameBuf[11] = "";  // Persistent across calls
+const char* promptHighScoreName() {
+  static char nameBuf[11] = "";
   strncpy(nameBuf, sessionName, sizeof(nameBuf));
   nameBuf[sizeof(nameBuf) - 1] = '\0';
   int nameLen = strlen(nameBuf);
 
-  const int marginLeft = 10;
-  const int lineHeight = 12;
-  const int inputY = 70;
+  const char* title = "NEW HIGH SCORE!";
+  const char* prompt = "Enter your name:";
+  const char* instructions = "Enter OK, Del Delete";
 
   M5Cardputer.Display.fillScreen(BLACK);
-  M5Cardputer.Display.setTextColor(WHITE);
+
+  // Title (centered, red, size 2)
+  M5Cardputer.Display.setTextSize(2);
+  M5Cardputer.Display.setTextColor(RED);
+  int titleX = (SCREEN_W - strlen(title) * 6 * 2) / 2;
+  M5Cardputer.Display.setCursor(titleX, 20);
+  M5Cardputer.Display.println(title);
+
+  // Prompt (centered, white, size 1)
   M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.setTextColor(WHITE);
+  int promptX = (SCREEN_W - strlen(prompt) * 6) / 2;
+  M5Cardputer.Display.setCursor(promptX, 50);
+  M5Cardputer.Display.println(prompt);
 
-  // Title
-  M5Cardputer.Display.setCursor(marginLeft, 20);
-  M5Cardputer.Display.println("NEW HIGH SCORE");
+  // Instructions (centered)
+  int instrX = (SCREEN_W - strlen(instructions) * 6) / 2;
+  M5Cardputer.Display.setCursor(instrX, 100);
+  M5Cardputer.Display.setTextColor(GREEN);
+  M5Cardputer.Display.println(instructions);
 
-  // Spacer + prompt
-  M5Cardputer.Display.setCursor(marginLeft, 20 + lineHeight * 2);
-  M5Cardputer.Display.println("Enter your name:");
+  M5Cardputer.Display.setTextColor(WHITE);
 
-  // Instructions
-  M5Cardputer.Display.setCursor(marginLeft, inputY + lineHeight + 4);
-  M5Cardputer.Display.println("Enter: OK    Del: Delete");
-
-  // Draw initial input field
-  M5Cardputer.Display.fillRect(marginLeft, inputY, SCREEN_W - 2 * marginLeft, lineHeight, BLACK);
-  M5Cardputer.Display.setCursor(marginLeft, inputY);
-  M5Cardputer.Display.print("> ");
-  M5Cardputer.Display.print(nameBuf);
+  const int inputY = 75;
+  const int inputX = 10;
 
   while (true) {
+    // Input line
+    M5Cardputer.Display.fillRect(inputX, inputY, SCREEN_W - 2 * inputX, 12, BLACK);
+    M5Cardputer.Display.setCursor(inputX, inputY);
+    M5Cardputer.Display.print("> ");
+    M5Cardputer.Display.print(nameBuf);
+
+    // Blinking cursor
+    if ((millis() / 500) % 2 && nameLen < 10) {
+      int cursorX = inputX + 12 + nameLen * 6;
+      M5Cardputer.Display.drawFastHLine(cursorX, inputY + 10, 6, WHITE);
+    }
+
     M5Cardputer.update();
 
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
       auto st = M5Cardputer.Keyboard.keysState();
 
-      // Backspace
+      // Backspace/Delete
       if (st.del && nameLen > 0) {
         nameBuf[--nameLen] = '\0';
       }
 
-      // Enter (finish)
+      // Enter (submit)
       if (st.enter && nameLen > 0) {
-        M5Cardputer.Display.fillRect(marginLeft, inputY, SCREEN_W - 2 * marginLeft, lineHeight, BLACK);
+        M5Cardputer.Display.fillRect(inputX, inputY, SCREEN_W - 2 * inputX, 12, BLACK);
         return nameBuf;
       }
 
-      // Add printable characters
+      // Printable characters
       for (char c : st.word) {
         if (isPrintable(c) && nameLen < 10) {
           nameBuf[nameLen++] = c;
           nameBuf[nameLen] = '\0';
         }
       }
+    }
 
-      // Redraw input
-      M5Cardputer.Display.fillRect(marginLeft, inputY, SCREEN_W - 2 * marginLeft, lineHeight, BLACK);
-      M5Cardputer.Display.setCursor(marginLeft, inputY);
-      M5Cardputer.Display.print("> ");
-      M5Cardputer.Display.print(nameBuf);
+    delay(50); // For cursor blink
+  }
+}
 
-      // Blinking cursor
-      if ((millis() / 500) % 2 && nameLen < 10) {
-        int cursorX = marginLeft + 12 + nameLen * 6;
-        M5Cardputer.Display.drawFastHLine(cursorX, inputY + 10, 6, WHITE);
+
+int countRemainingAliens() {
+  int count = 0;
+  for (int row = 0; row < numRows; row++) {
+    for (int col = 0; col < numCols; col++) {
+      if (aliens[row][col].alive) {
+        count++;
       }
     }
   }
+  return count;
 }
 
 void setup() {
@@ -760,9 +799,7 @@ void loop() {
 
       if (!shipExplosionOngoing) {
         shipHit = false;
-        if (pendingGameOver) {
-          handleGameOver();
-        } else {
+        if (!pendingGameOver) {
           shipX = SCREEN_W / 2 - 5;
         }
       }
@@ -809,12 +846,28 @@ void loop() {
 
           lives--;
           if (lives <= 0) {
+            lives = 0;
             pendingGameOver = true;  // defer showing Game Over
           }
         }
       }
     }
 
+    // Dynamically adjust alien move interval based on remaining aliens
+    int remainingAliens = countRemainingAliens();
+    if (remainingAliens > 20) {
+      alienMoveInterval = 400;
+    } else if (remainingAliens > 10) {
+      alienMoveInterval = 300;
+    } else if (remainingAliens > 5) {
+      alienMoveInterval = 200;
+    } else if (remainingAliens > 3) {
+      alienMoveInterval = 100;
+    } else if (remainingAliens > 1) {
+      alienMoveInterval = 75;
+    } else {
+      alienMoveInterval = 30;
+    }
     if (millis() - lastAlienMove > alienMoveInterval) {
       M5Cardputer.Speaker.tone(alienMarchTones[currentAlienTone], 100);
       currentAlienTone = (currentAlienTone + 1) % 4;
@@ -855,8 +908,9 @@ void loop() {
 
     if (aliensReachedPlayer()) {
       lives--;
+      if (lives < 0) lives = 0;
       startCrackleAndBoom();
-      if (lives <= 0) handleGameOver();
+      if (lives <= 0) pendingGameOver = true;
       initAliens();
     }
 
@@ -916,8 +970,7 @@ void loop() {
       }
     }
 
-    drawScore();
-    drawLives();
+    drawScoreAndLives();
     drawBonusText();
 
     if (lives <= 0) {
