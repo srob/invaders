@@ -72,15 +72,29 @@ struct Alien {
 
 Alien aliens[numRows][numCols];
 
-const uint8_t alienSprite[8] = {
-  B00100010,
-  B01110111,
-  B11111111,
-  B10111101,
-  B11111111,
-  B10001001,
-  B00100100,
-  B01000010
+// Two animation frames for the aliens. Switching between these frames every
+// few updates gives a simple walking animation.
+const uint8_t alienSprites[2][8] = {
+    {
+        B00100010,
+        B01110111,
+        B11111111,
+        B10111101,
+        B11111111,
+        B10001001,
+        B00100100,
+        B01000010
+    },
+    {
+        B00100010,
+        B01110111,
+        B11111111,
+        B10111101,
+        B11111111,
+        B01000010,
+        B00111100,
+        B10000001
+    }
 };
 
 const int maxAlienBullets = 5;
@@ -192,8 +206,10 @@ void updateAliens() {
       Alien &a = aliens[row][col];
       if (a.alive) {
         for (int y = 0; y < 8; y++) {
+          const uint8_t rowData =
+              alienSprites[alienAnimationFrame ? 1 : 0][y];
           for (int x = 0; x < 8; x++) {
-            if (alienSprite[y] & (1 << (7 - x))) {
+            if (rowData & (1 << (7 - x))) {
               M5Cardputer.Display.drawPixel(a.x + x, a.y + y, WHITE);
             }
           }
