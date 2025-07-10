@@ -198,8 +198,6 @@ void clearBullet() {
 // }
 
 void updateAliens() {
-  // Clear the entire area where aliens live
-  M5Cardputer.Display.fillRect(0, alienAreaTop, SCREEN_W, alienAreaHeight, BLACK);
 
   for (int row = 0; row < numRows; row++) {
     for (int col = 0; col < numCols; col++) {
@@ -229,11 +227,13 @@ bool isExplosionAt(int x, int y) {
 }
 
 void clearAliens() {
+  const int spriteSize = 8;  // actual drawn alien sprite dimension
   for (int row = 0; row < numRows; row++) {
     for (int col = 0; col < numCols; col++) {
       Alien &a = aliens[row][col];
-      if (a.alive && !isExplosionAt(a.x, a.y)) {
-        M5Cardputer.Display.fillRect(a.x, a.y, alienW, alienH, BLACK);
+      if (!isExplosionAt(a.x, a.y)) {
+        // Clear both living and recently destroyed aliens
+        M5Cardputer.Display.fillRect(a.x, a.y, spriteSize, spriteSize, BLACK);
       }
     }
   }
@@ -1008,7 +1008,7 @@ void loop() {
     lastFrame = millis();
     clearShip();
     if (bulletActive) clearBullet();
-    // clearAliens();
+    clearAliens();
     clearExplosions();
     clearAlienBullets();
 
