@@ -227,11 +227,13 @@ bool isExplosionAt(int x, int y) {
 }
 
 void clearAliens() {
+  const int spriteSize = 8;  // actual drawn alien sprite dimension
   for (int row = 0; row < numRows; row++) {
     for (int col = 0; col < numCols; col++) {
       Alien &a = aliens[row][col];
-      if (a.alive && !isExplosionAt(a.x, a.y)) {
-        M5Cardputer.Display.fillRect(a.x, a.y, alienW, alienH, BLACK);
+      if (!isExplosionAt(a.x, a.y)) {
+        // Clear both living and recently destroyed aliens
+        M5Cardputer.Display.fillRect(a.x, a.y, spriteSize, spriteSize, BLACK);
       }
     }
   }
