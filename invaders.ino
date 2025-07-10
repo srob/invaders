@@ -198,8 +198,6 @@ void clearBullet() {
 // }
 
 void updateAliens() {
-  // Clear the entire area where aliens live
-  M5Cardputer.Display.fillRect(0, alienAreaTop, SCREEN_W, alienAreaHeight, BLACK);
 
   for (int row = 0; row < numRows; row++) {
     for (int col = 0; col < numCols; col++) {
@@ -1008,7 +1006,7 @@ void loop() {
     lastFrame = millis();
     clearShip();
     if (bulletActive) clearBullet();
-    // clearAliens();
+    clearAliens();
     clearExplosions();
     clearAlienBullets();
 
